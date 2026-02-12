@@ -2,7 +2,16 @@ import mysql.connector as c
 import sys
 import datetime as d
 from decimal import Decimal
-con=c.connect(host="localhost",user="root",password="",database="library")
+from utils import log_all_methods,log_and_protect,get_configured_logger,logger
+
+#database connection logic
+try:
+    con=c.connect(host="localhost",user="root",password="",database="library")
+    logger.info("connected to database successfully")
+except:
+    logger.critical("error occured")
+    logger.exception("Cannot connect to database")
+    sys.exit()
 cursor=con.cursor()
 
 #*******************************************
@@ -22,7 +31,7 @@ cursor=con.cursor()
 #*******************************************
 # cursor.execute("insert into inventory(book_id,total_copies,issued,available) select book_id,copies_available as total_copies,0 as issued,copies_available as available from books;")
 # con.commit()
-
+@log_and_protect
 def authentication(profile):
     id=int(input("Enter your id: "))
     password=input("Enter your password: ").strip()
@@ -36,11 +45,13 @@ def authentication(profile):
     # print(auth_list)
     for i in auth_list:
         if i[0]==id and i[1]==password:
+            logger.info("profile logged in successfully")
             print("Welcome! ")
             return id
         else:
-            print("wrong password")
+            logger.critical("unauthorized acess")
             sys.exit("wrong password! try again later!")
+@log_all_methods
 class book:
     def __init__(self,title,author,genre,price,copies_available):
         
@@ -49,33 +60,12 @@ class book:
         self.genre=genre
         self.price=price
         self.copies_available=copies_available
+@log_all_methods
 class Admin:
     def __init__(self,admin_id):
         self.admin_id=admin_id
     def new_book(self,book):
         cursor.execute("insert into books (title,author,genre,price,copies_available) values (%s,%s,%s,%s,%s)",(book.title,book.author,book.genre,book.price,book.copies_available))
-        con.commit()
-    def delete_book(self,book_name):
-        cursor.execute("""delete from books where title=%s""",(book_name,))
-        con.commit()
-    def update(self,table_name):
-        
-        cursor.execute("SELECT column_name, data_type FROM INFORMATION_SCHEMA.COLUMNS WHERE table_name = %s AND table_schema ='library' ORDER BY ordinal_position;",(table_name,))
-       
-        a=cursor.fetchall()
-       
-       
-        columns_dict={i:value[0] for i,value in enumerate(a[1:],start=1)}
-        print(f"available columns are-{columns_dict}")
-        column=int(input("Enter the column number you want to update: "))
-        row=int(input("Enter the id you want to update: "))
-        if a[column][1]=='int' or a[column][1]=='decimal':
-            new=int(input("Enter the new value: "))
-        else:
-            new=input("Enter the new value: ")
-        
-        query=f"update {table_name} set {columns_dict[column]}=%s where {a[0][0]}=%s;"
-        cursor.execute(query,(new,row))
         con.commit()
     def check(self,table_name):
         query=f"select * from {table_name}"
@@ -83,6 +73,41 @@ class Admin:
         data=cursor.fetchall()
         for i in data:
             print(i)
+        return data
+        
+    def delete_book(self,book_name):
+       
+        cursor.execute("""delete from books where title=%s""",(book_name,))
+        if cursor.rowcount==0:
+            raise ValueError(f"{book_name} does not exist in library")
+        print(f"{book_name} is deleted")
+        con.commit()
+        
+        
+    def update(self,table_name):
+        
+        cursor.execute("SELECT column_name, data_type FROM INFORMATION_SCHEMA.COLUMNS WHERE table_name = %s AND table_schema ='library' ORDER BY ordinal_position;",(table_name,))
+        a=cursor.fetchall()
+        print(a)
+        #listing columns
+        columns_dict={i:value[0] for i,value in enumerate(a[1:],start=1)}
+        print(f"available columns are-{columns_dict}")
+        column=int(input("Enter the column number you want to update: "))
+        row=int(input("Enter the bookid you want to update: "))
+        #taking input based on datatype of the column
+        if a[column][1]=='int' or a[column][1]=='decimal':
+            new=int(input("Enter the new value: "))
+        else:
+            new=input("Enter the new value: ")
+        
+        query=f"update {table_name} set {columns_dict[column]}=%s where {a[0][0]}=%s;"
+        cursor.execute(query,(new,row))
+        if cursor.rowcount==0:
+            raise ValueError(f"Either book_id or column provided are wrong in {table_name}")
+        con.commit()
+        
+    
+@log_all_methods
 class User:
     def __init__(self,id):
         self.id=id
@@ -169,73 +194,74 @@ class User:
             print(f"Book with {book_id} book id was not issued to you.kindly check again the book id you entered! ")
 
 def main():
-    profile=int(input("enter 1 for Admin ,2 for user"))
-    if profile not in(1,2):
-        print("please enter a valid profile!")
-    id=authentication(profile)
     while True:
-        if profile==1:
-            admin=Admin(id)
-            print("options for admin:")
-            print("""Add book-1,delete book-2,update/check a specific table-3""")
-            choice=int(input("Enter your choice: " ))
+    # print(Admin.__dict__.items())
+        profile=int(input("enter 1 for Admin ,2 for user"))
+        if profile not in(1,2):
+            print("please enter a valid profile!")
+        id=authentication(profile)
+        while True:
+            if profile==1:
+                admin=Admin(id)
+                print("options for admin:")
+                print("""Add book-1,delete book-2,update/check a specific table-3""")
+                choice=int(input("Enter your choice: " ))
 
-            if choice==1:
-                print("provide the details for the book you want to add-- ")
-                title=input("Book name: ")
-                author=input("Author: ")
-                genre=input("Genre: ")
-                price=input("Price of the book: ")
-                copies_available=int(input("How many copies of this book are being added: "))
-                newBook=book(title,author,genre,price,copies_available)
-                admin.new_book(newBook)
-                print(f"new book-{title}- added")
-            elif choice==2:
-                book_name=input("Enter the name of the book to be deleted: ").strip().title()
-                admin.delete_book(book_name)
-                print(f"{book_name} is deleted")
-            elif choice==3:
-                table_dict={1:"books",2:"inventory",3:"issuer",4:"user"}
-                print("Available tables are-")
-                print(table_dict)
-                table=int(input("Enter the table number you want to update/check: "))
-                operation=int(input("Enter 1 for update and 2 for check"))
-                if operation==1:
-                    admin.update(table_dict[table])
-                if operation==2:
-                    admin.check(table_dict[table])
-            
-            else:
-                print("please enter a valid choice!")
+                if choice==1:
+                    print("provide the details for the book you want to add-- ")
+                    title=input("Book name: ")
+                    author=input("Author: ")
+                    genre=input("Genre: ")
+                    price=input("Price of the book: ")
+                    copies_available=int(input("How many copies of this book are being added: "))
+                    newBook=book(title,author,genre,price,copies_available)
+                    admin.new_book(newBook)
+                    print(f"new book-{title}- added")
+                elif choice==2:
+                    book_name=input("Enter the name of the book to be deleted: ").strip().title()
+                    admin.delete_book(book_name)
+                elif choice==3:
+                    table_dict={1:"books",2:"inventory",3:"issuer",4:"user"}
+                    print("Available tables are-")
+                    print(table_dict)
+                    table=int(input("Enter the table number you want to update/check: "))
+                    operation=int(input("Enter 1 for update and 2 for check"))
+                    if operation==1:
+                        admin.update(table_dict[table])
+                    if operation==2:
+                        admin.check(table_dict[table])
+                
+                else:
+                    print("please enter a valid choice!")
 
-        elif profile==2:
-            user=User(id)
-            print("options available for user are: ")
-            print("1-inventory check,2-issuing,3-check what issued ,4-return a book")
-            choice=int(input("Enter your choice: "))
-            if choice==1:
-                user.book_check()
-            elif choice==2:
-                book_id=int(input("Enter the book id to be issued: "))
-                user.issue(book_id)
-            elif choice==3:
-                user.check_issued()
-            elif choice==4:
-                cursor.execute("select 1 from issuer where user_id=%s",(id,))
-                if len(cursor.fetchall())==0:
-                    print(f"You have not issued any book yet!")
-                    continue
-                book_id=int(input("Enter the book id to be returned: "))
-                user.return_book(book_id)
-            else:
-                print("please enter a valid choice!")
-        end=input("Enter 'L' to logout 'E' to exit the program and 'C' to continue ").strip().lower()
-        if end=='c':
-            continue
-        elif end=='l':
-                break
-        elif end=='e':
-            sys.exit("Thankyou for using library management system!Have a good day!")
+            elif profile==2:
+                user=User(id)
+                print("options available for user are: ")
+                print("1-inventory check,2-issuing,3-check what issued ,4-return a book")
+                choice=int(input("Enter your choice: "))
+                if choice==1:
+                    user.book_check()
+                elif choice==2:
+                    book_id=int(input("Enter the book id to be issued: "))
+                    user.issue(book_id)
+                elif choice==3:
+                    user.check_issued()
+                elif choice==4:
+                    cursor.execute("select 1 from issuer where user_id=%s",(id,))
+                    if len(cursor.fetchall())==0:
+                        print(f"You have not issued any book yet!")
+                        continue
+                    book_id=int(input("Enter the book id to be returned: "))
+                    user.return_book(book_id)
+                else:
+                    print("please enter a valid choice!")
+            end=input("Enter 'L' to logout 'E' to exit the program and 'C' to continue ").strip().lower()
+            if end=='c':
+                continue
+            elif end=='l':
+                    break
+            elif end=='e':
+                sys.exit("Thankyou for using library management system!Have a good day!")
 
 
 if __name__=="__main__":
